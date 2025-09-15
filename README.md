@@ -1,169 +1,100 @@
 ChatGPTに作成してもらった。 
  
-使い方（要点） 
-・管理者として PowerShell を起動（「管理者として実行」）。 
-・下のスクリプト全文を Install-VCRedists.ps1 などとして保存。 
-・PowerShell で保存したスクリプトのあるフォルダに移動し、.\Install-VCRedists.ps1 を実行。 
- 
-注意 
-・インストーラはサイレント動作（例：/install /quiet /norestart）で実行します。異なるインストーラは別のスイッチが必要な場合があるので、その場合は InstallArgs を個別に上書きしてください。 
-・実行には 管理者権限 が必要です。 
-・ネットワーク環境や URL の有効期限によりダウンロードに失敗する場合があります。その場合は公式 Microsoft のページから該当の再頒布パッケージの URL を取得して -$InstallList に追加してください。 
- 
-スクリプト（そのままコピペして実行できます） 
+Microsoft 公式配布リンクを使用。
+各バージョンごとに x86 / x64 両方を対象。
+サイレントインストール /quiet /norestart。
+結果をログ VCRedist_Install.log に出力。
+ダウンロードは curl（Windows 10 以降標準搭載）を利用。
+
+特徴
+2005 → 2008 SP1 → 2010 SP1 → 2012 Update 4 → 2013 → 2015-2022 統合版（最新）
+x86 / x64 両方インストール
+curl を使用してダウンロード（Windows 10/11 標準対応）
+結果をログに記録
+
+⚠ 注意点:
+再頒布パッケージは既にインストール済みの場合、処理は自動でスキップされます。
+古い VC++ は順にインストールする必要があります（後のバージョンでは完全互換ではないため）。
+
 ```
-<#
-.SYNOPSIS
-  複数の Visual C++ 再頒布パッケージを一括ダウンロード & サイレントインストールし、ログを出力するスクリプト。
+@echo off
+setlocal enabledelayedexpansion
 
-.NOTES
-  実行は管理者権限で行ってください。
-  必要に応じて $InstallList に URL とインストーラ引数を追加・編集してください。
-#>
+:: ============================================
+:: Visual C++ Redistributable 一括インストール
+:: 2005 ～ 2022 全バージョン
+:: ============================================
 
-# --- 設定 ---
-# ログファイル
-$logFolder = "$env:ProgramData\VCRedistInstaller"
-if (-not (Test-Path $logFolder)) { New-Item -Path $logFolder -ItemType Directory -Force | Out-Null }
-$timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
-$logFile = Join-Path $logFolder "VCRedistInstall_$timestamp.log"
+set LOGFILE=%~dp0VCRedist_Install.log
+echo ================================ >> "%LOGFILE%"
+echo 開始 %date% %time% >> "%LOGFILE%"
+echo ================================ >> "%LOGFILE%"
 
-# 一時ダウンロードフォルダ
-$tempDir = Join-Path $env:TEMP "VCRedistInstaller_$timestamp"
-New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+set TEMPDIR=%TEMP%\VCRedist_%RANDOM%
+mkdir "%TEMPDIR%"
 
-# インストール対象のリスト
-# 各アイテムは @{ Name='表示名'; Url='ダウンロード先'; InstallArgs='インストール時引数' }
-# aka.ms リダイレクトは最新版の Visual C++ 再頒布パッケージ（2015-2022 等）へ飛びます
-$InstallList = @(
-    @{ Name='VC++ Redistributable x64 (Latest 2015-2022)'; Url='https://aka.ms/vs/17/release/vc_redist.x64.exe'; InstallArgs='/install /quiet /norestart' },
-    @{ Name='VC++ Redistributable x86 (Latest 2015-2022)'; Url='https://aka.ms/vs/17/release/vc_redist.x86.exe'; InstallArgs='/install /quiet /norestart' }
-    # 例: 古いバージョンを追加する場合はここに行を追加
-    # @{ Name='VC++ 2013 x86'; Url='https://download.microsoft.com/.../vcredist_x86.exe'; InstallArgs='/quiet /norestart' }
+:: ====== ダウンロードURLリスト ======
+:: 2005
+set URLS[1]=https://download.microsoft.com/download/1/4/6/14695FCA-22D0-4630-8A74-389A0C5F6B7E/vcredist_x86.EXE
+set URLS[2]=https://download.microsoft.com/download/1/4/6/14695FCA-22D0-4630-8A74-389A0C5F6B7E/vcredist_x64.EXE
+
+:: 2008 SP1
+set URLS[3]=https://download.microsoft.com/download/2/9/5/295A6C04-C438-45A8-B90F-9356B3963C5C/vcredist_x86.exe
+set URLS[4]=https://download.microsoft.com/download/2/9/5/295A6C04-C438-45A8-B90F-9356B3963C5C/vcredist_x64.exe
+
+:: 2010 SP1
+set URLS[5]=https://download.microsoft.com/download/1/6/5/165255E3-8F4F-4E9D-8C8C-4E7D64D5C798/vcredist_x86.exe
+set URLS[6]=https://download.microsoft.com/download/1/6/5/165255E3-8F4F-4E9D-8C8C-4E7D64D5C798/vcredist_x64.exe
+
+:: 2012 Update 4
+set URLS[7]=https://download.microsoft.com/download/1/6/B/16B06F60-3B20-4FF2-B699-5E9B7962F9AE/VSU_4/vcredist_x86.exe
+set URLS[8]=https://download.microsoft.com/download/1/6/B/16B06F60-3B20-4FF2-B699-5E9B7962F9AE/VSU_4/vcredist_x64.exe
+
+:: 2013
+set URLS[9]=https://download.microsoft.com/download/9/3/F/93FCF1E7-E6A4-478B-96E7-D4B285925B00/vcredist_x86.exe
+set URLS[10]=https://download.microsoft.com/download/9/3/F/93FCF1E7-E6A4-478B-96E7-D4B285925B00/vcredist_x64.exe
+
+:: 2015-2022 最新 (統合版)
+set URLS[11]=https://aka.ms/vs/17/release/vc_redist.x86.exe
+set URLS[12]=https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+:: ====== ダウンロード & インストール処理 ======
+for /L %%i in (1,1,12) do (
+    set "URL=!URLS[%%i]!"
+    if not "!URL!"=="" (
+        echo.
+        echo [%%i] ダウンロード中: !URL!
+        echo [%%i] ダウンロード中: !URL! >> "%LOGFILE%"
+
+        set FILE=%TEMPDIR%\vcredist_%%i.exe
+        curl -L -o "!FILE!" "!URL!" >> "%LOGFILE%" 2>&1
+
+        if exist "!FILE!" (
+            echo [%%i] ダウンロード成功: !FILE!
+            echo [%%i] インストール開始 >> "%LOGFILE%"
+            "!FILE!" /quiet /norestart >> "%LOGFILE%" 2>&1
+            if !errorlevel! equ 0 (
+                echo [%%i] インストール成功 >> "%LOGFILE%"
+            ) else (
+                echo [%%i] インストール失敗 (エラーコード=!errorlevel!) >> "%LOGFILE%"
+            )
+        ) else (
+            echo [%%i] ダウンロード失敗 >> "%LOGFILE%"
+        )
+    )
 )
 
-# --- ログ関数 ---
-function Log {
-    param($Text, $Level='INFO')
-    $time = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    $line = "[$time] [$Level] $Text"
-    $line | Tee-Object -FilePath $logFile -Append
-    Write-Output $line
-}
+:: 後処理
+rd /s /q "%TEMPDIR%"
 
-# --- 管理者権限チェック ---
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Error "このスクリプトは管理者権限で実行する必要があります。PowerShellを「管理者として実行」してから再試行してください。"
-    exit 1
-}
+echo ================================ >> "%LOGFILE%"
+echo 完了 %date% %time% >> "%LOGFILE%"
+echo ================================ >> "%LOGFILE%"
 
-Log "開始: VCRedist 一括インストールスクリプト" "START"
-Log "ログファイル: $logFile"
+echo.
+echo すべての処理が完了しました。ログは %LOGFILE% を確認してください。
+pause
+endlocal
 
-# --- ダウンロード関数（リトライ対応） ---
-function Download-File {
-    param($Url, $OutPath, $MaxAttempts = 3)
-    $attempt = 0
-    while ($attempt -lt $MaxAttempts) {
-        $attempt++
-        try {
-            Log "ダウンロード試行 ($attempt/$MaxAttempts): $Url"
-            Invoke-WebRequest -Uri $Url -OutFile $OutPath -UseBasicParsing -TimeoutSec 120
-            if (Test-Path $OutPath -PathType Leaf) {
-                Log "ダウンロード成功: $OutPath"
-                return $true
-            }
-        } catch {
-            Log "ダウンロード失敗 (attempt $attempt): $($_.Exception.Message)" "WARN"
-            Start-Sleep -Seconds (5 * $attempt)
-        }
-    }
-    Log "ダウンロード失敗（最大試行回数）: $Url" "ERROR"
-    return $false
-}
-
-# --- インストール処理 ---
-foreach ($item in $InstallList) {
-    $name = $item.Name
-    $url = $item.Url
-    $args = $item.InstallArgs
-    $safeName = ($name -replace '[^0-9A-Za-z\-_\.]', '_')
-    $installerPath = Join-Path $tempDir ($safeName + "_" + [IO.Path]::GetFileName($url))
-
-    Log "処理対象: $name"
-    # ダウンロード
-    $dlOk = Download-File -Url $url -OutPath $installerPath -MaxAttempts 3
-    if (-not $dlOk) {
-        Log "スキップ: ダウンロードできないため $name のインストールを中止します。" "ERROR"
-        continue
-    }
-
-    # 実行許可チェック（ブロック解除）
-    try {
-        Unblock-File -Path $installerPath -ErrorAction SilentlyContinue
-    } catch {
-        # ignore
-    }
-
-    # インストール実行
-    Log "インストール実行: $name"
-    try {
-        $startInfo = @{
-            FilePath = $installerPath
-            ArgumentList = $args
-            Wait = $true
-            NoNewWindow = $true
-            RedirectStandardOutput = $true
-            RedirectStandardError = $true
-        }
-        # Start-Process ではリダイレクトの捕捉が面倒なため、Process クラスを利用
-        $proc = New-Object System.Diagnostics.Process
-        $proc.StartInfo.FileName = $installerPath
-        $proc.StartInfo.Arguments = $args
-        $proc.StartInfo.UseShellExecute = $false
-        $proc.StartInfo.RedirectStandardOutput = $true
-        $proc.StartInfo.RedirectStandardError = $true
-        $proc.StartInfo.CreateNoWindow = $true
-        $proc.Start() | Out-Null
-
-        $stdOut = $proc.StandardOutput.ReadToEnd()
-        $stdErr = $proc.StandardError.ReadToEnd()
-        $proc.WaitForExit()
-        $exitCode = $proc.ExitCode
-
-        if ($stdOut) { Log "標準出力: $stdOut" }
-        if ($stdErr) { Log "標準エラー: $stdErr" }
-
-        Log "終了コード ($name): $exitCode"
-        if ($exitCode -eq 0) {
-            Log "インストール成功: $name"
-        } else {
-            Log "インストール失敗（非0終了）: $name" "ERROR"
-        }
-    } catch {
-        Log "インストール実行中に例外発生: $($_.Exception.Message)" "ERROR"
-    }
-}
-
-# --- 後片付け ---
-try {
-    Log "インストール処理完了。ダウンロード一時フォルダ: $tempDir"
-    # 一時フォルダを残す/削除するか選べるように
-    $keepTemp = $false
-    if (-not $keepTemp) {
-        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-        Log "一時フォルダを削除しました。"
-    } else {
-        Log "一時フォルダを保持します: $tempDir"
-    }
-} catch {
-    Log "後片付けでエラー: $($_.Exception.Message)" "WARN"
-}
-
-Log "完了: VCRedist 一括インストールスクリプト 終了" "END"
 ```
-補足（トラブルシューティング） 
-・インストールが失敗する場合はログ ($logFile) をまず確認してください。標準出力／標準エラーを記録しています。 
-・特定のインストーラだけ引数が違う場合は、$InstallList のその要素の InstallArgs を該当インストーラに合わせて修正してください（例：古い vcredist は /q /norestart など）。 
-・オフライン環境の場合は、あらかじめインストーラをダウンロードしてローカルパスを Url の代わりに指定できます（file:// 形式でもOK）。 
-・サイレントインストール後に再起動が必要な場合は、/norestart を外すか、手動で再起動してください。 
+
